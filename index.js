@@ -1,23 +1,25 @@
-const express = require('express');
+const express = require("express");
 const app = express();
 
 app.use(express.json());
 
-app.post('/lark-webhook', (req, res) => {
-  const body = req.body;
+app.post("/", (req, res) => {
+    const body = req.body;
 
-  // Lark URL verification
-  if (body.type === 'url_verification') {
-    return res.json({
-      challenge: body.challenge
-    });
-  }
+    // 🔹 Handle Lark URL verification
+    if (body.type === "url_verification") {
+        return res.json({
+            challenge: body.challenge
+        });
+    }
 
-  console.log('Event received:', body);
+    // 🔹 Handle normal events
+    console.log("Event received:", body);
 
-  res.send('ok');
+    res.json({ message: "ok" });
 });
 
-app.listen(3000, () => {
-  console.log('Server running on port 3000');
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
 });
