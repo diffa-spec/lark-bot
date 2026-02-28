@@ -3,23 +3,26 @@ const app = express();
 
 app.use(express.json());
 
+// Lark event endpoint
 app.post("/", (req, res) => {
-    const body = req.body;
+    console.log("Received body:", req.body);
 
-    // 🔹 Handle Lark URL verification
-    if (body.type === "url_verification") {
-        return res.json({
-            challenge: body.challenge
+    if (req.body.type === "url_verification") {
+        return res.status(200).json({
+            challenge: req.body.challenge
         });
     }
 
-    // 🔹 Handle normal events
-    console.log("Event received:", body);
-
-    res.json({ message: "ok" });
+    return res.status(200).json({ ok: true });
 });
 
-const PORT = process.env.PORT || 3000;
+// Health check route
+app.get("/", (req, res) => {
+    res.status(200).send("Server is running");
+});
+
+// 🔥 IMPORTANT: Use Render's PORT
+const PORT = process.env.PORT;
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
