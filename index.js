@@ -77,7 +77,7 @@ async function handleLarkMessage(body) {
     console.log("Received message:", userMessage, "| chatId:", chatId);
 
     const response = await anthropic.messages.create({
-      model: "claude-3-haiku-20240307",
+      model: "claude-haiku-4-5-20251001",
       max_tokens: 300,
       system: `You are a helpful assistant inside Lark chat. Reply naturally but concisely.`,
       messages: [{ role: "user", content: userMessage }],
