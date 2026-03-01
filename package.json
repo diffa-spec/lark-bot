@@ -10,6 +10,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
     "body-parser": "^2.2.2",
     "express": "^5.2.1"
   }
