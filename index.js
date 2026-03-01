@@ -116,28 +116,74 @@ app.post("/", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────
-// 📋 Attio webhook — notifies a Lark chat when
-// a new contact is added in Attio
+// 🔍 Fetch full record details from Attio API
+// ─────────────────────────────────────────────
+async function getAttioRecord(objectId, recordId) {
+  const res = await axios.get(
+    `https://api.attio.com/v2/objects/${objectId}/records/${recordId}`,
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.ATTIO_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+    }
+  );
+  return res.data.data;
+}
+
+// ─────────────────────────────────────────────
+// 📋 Attio webhook — notifies Lark when a
+// record is created/updated in Attio
 // ─────────────────────────────────────────────
 app.post("/attio-webhook", async (req, res) => {
   const data = req.body;
 
   console.log("Attio event received:", JSON.stringify(data, null, 2));
 
-  // Adjust these field paths based on your actual Attio payload
-  const name = data.data?.values?.name?.[0]?.value || "Unknown";
-  const company = data.data?.values?.company?.[0]?.value || "Unknown";
-  const email = data.data?.values?.email_addresses?.[0]?.email_address || "No email";
-
-  // ✅ Use LARK_NOTIFY_CHAT_ID env var — this is the chat where Attio alerts go
-  const notifyChatId = process.env.LARK_NOTIFY_CHAT_ID;
-
-  await sendMessageToLark(
-    notifyChatId,
-    `📇 New Contact Added to Attio\n\nName: ${name}\nCompany: ${company}\nEmail: ${email}`
-  );
-
+  // ✅ Respond to Attio immediately
   res.sendStatus(200);
+
+  // ✅ Only process the FIRST event to avoid duplicate messages
+  const event = data.events?.[0];
+  if (!event) return;
+
+  const { object_id, record_id } = event.id;
+
+  try {
+    // Fetch the full record from Attio API
+    const record = await getAttioRecord(object_id, record_id);
+
+    console.log("Attio record fetched:", JSON.stringify(record, null, 2));
+
+    // Extract values — the log above will show exact field names if these don't match
+    const name =
+      record.values?.name?.[0]?.full_name ||
+      record.values?.name?.[0]?.value ||
+      "Unknown";
+
+    const company =
+      record.values?.company?.[0]?.target_record?.values?.name?.[0]?.value ||
+      record.values?.company?.[0]?.value ||
+      "Unknown";
+
+    const email =
+      record.values?.email_addresses?.[0]?.email_address ||
+      record.values?.primary_email_address?.[0]?.email_address ||
+      "No email";
+
+    const notifyChatId = process.env.LARK_NOTIFY_CHAT_ID;
+    const eventLabel =
+      event.event_type === "record.created"
+        ? "New Contact Added"
+        : "Contact Updated";
+
+    await sendMessageToLark(
+      notifyChatId,
+      `📇 ${eventLabel} in Attio\n\nName: ${name}\nCompany: ${company}\nEmail: ${email}`
+    );
+  } catch (err) {
+    console.error("❌ Attio fetch error:", err.response?.data || err.message);
+  }
 });
 
 // ─────────────────────────────────────────────
