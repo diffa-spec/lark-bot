@@ -1,28 +1,55 @@
 console.log("NEW VERSION DEPLOYED");
 const express = require("express");
-const app = express();
+const Anthropic = require("@anthropic-ai/sdk");
 
+const app = express();
 app.use(express.json());
 
-app.post("/", (req, res) => {
-    console.log("Incoming body:", req.body);
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+});
 
-    if (req.body.type === "url_verification") {
-        return res.status(200).json({
-            challenge: req.body.challenge
-        });
+app.post("/", async (req, res) => {
+  const body = req.body;
+
+  // 🔹 Lark URL verification
+  if (body.type === "url_verification") {
+    return res.json({ challenge: body.challenge });
+  }
+
+  // 🔹 Handle message events
+  if (body.event && body.event.message) {
+    const userMessage = body.event.message.content;
+
+    try {
+      const response = await anthropic.messages.create({
+        model: "claude-3-haiku-20240307",
+        max_tokens: 300,
+        messages: [
+          { role: "user", content: userMessage }
+        ]
+      });
+
+      const claudeReply = response.content[0].text;
+
+      console.log("Claude reply:", claudeReply);
+
+      // ⚠️ For now just log it
+      // Next step we will send it back to Lark
+
+    } catch (error) {
+      console.error("Claude error:", error);
     }
+  }
 
-    // Always respond 200 for other events
-    return res.status(200).json({});
+  res.json({});
 });
 
 app.get("/", (req, res) => {
-    res.status(200).send("Server is running");
+  res.send("Server running");
 });
 
 const PORT = process.env.PORT || 3000;
-
 app.listen(PORT, () => {
-    console.log("Server running on port", PORT);
+  console.log("Server running on port", PORT);
 });
