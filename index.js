@@ -13,7 +13,6 @@ const anthropic = new Anthropic({
 
 // ─────────────────────────────────────────────
 // 🔑 Get a fresh Lark tenant access token
-// (tokens expire every 2 hours, so always fetch fresh)
 // ─────────────────────────────────────────────
 async function getTenantToken() {
   const res = await axios.post(
@@ -66,7 +65,6 @@ async function sendMessageToLark(chatId, message) {
 
 // ─────────────────────────────────────────────
 // 💬 Handle incoming Lark bot messages
-// (separated so we can respond to Lark immediately)
 // ─────────────────────────────────────────────
 async function handleLarkMessage(body) {
   try {
@@ -84,7 +82,6 @@ async function handleLarkMessage(body) {
     });
 
     const claudeReply = response.content[0].text;
-
     await sendMessageToLark(chatId, claudeReply);
   } catch (error) {
     console.error("❌ Chat handling error:", error);
@@ -97,17 +94,12 @@ async function handleLarkMessage(body) {
 app.post("/", async (req, res) => {
   const body = req.body;
 
-  // Lark URL verification handshake
   if (body.type === "url_verification") {
     return res.json({ challenge: body.challenge });
   }
 
-  // Handle message events
   if (body.event && body.event.message) {
-    // ✅ Respond to Lark immediately (must be within ~3s or Lark will retry)
     res.json({});
-
-    // Process asynchronously after responding
     handleLarkMessage(body).catch(console.error);
     return;
   }
@@ -116,7 +108,7 @@ app.post("/", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────
-// 🔍 Fetch full record details from Attio API
+// 🔍 Fetch a record from Attio by object slug + record ID
 // ─────────────────────────────────────────────
 async function getAttioRecord(objectId, recordId) {
   const res = await axios.get(
@@ -132,44 +124,98 @@ async function getAttioRecord(objectId, recordId) {
 }
 
 // ─────────────────────────────────────────────
-// 📋 Attio webhook — notifies Lark when a
-// record is created/updated in Attio
+// 🏢 Fetch company name via its record-reference
+// ─────────────────────────────────────────────
+async function getCompanyName(targetRecordId) {
+  try {
+    // Companies live under the "companies" object slug in Attio
+    const res = await axios.get(
+      `https://api.attio.com/v2/objects/companies/records/${targetRecordId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.ATTIO_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+    const companyRecord = res.data.data;
+    return (
+      companyRecord.values?.name?.[0]?.value ||
+      companyRecord.values?.name?.[0]?.full_name ||
+      "Unknown"
+    );
+  } catch (err) {
+    console.error("❌ Company fetch error:", err.response?.data || err.message);
+    return "Unknown";
+  }
+}
+
+// ─────────────────────────────────────────────
+// 🧠 Deduplication cache
+// Prevents duplicate Lark messages when Attio fires
+// multiple webhook calls for the same record update
+// ─────────────────────────────────────────────
+const recentlyProcessed = new Map(); // record_id → timestamp
+const DEDUP_WINDOW_MS = 5000; // 5 seconds
+
+function isDuplicate(recordId) {
+  const last = recentlyProcessed.get(recordId);
+  if (last && Date.now() - last < DEDUP_WINDOW_MS) {
+    return true;
+  }
+  recentlyProcessed.set(recordId, Date.now());
+
+  // Clean up old entries to avoid memory leak
+  for (const [id, ts] of recentlyProcessed.entries()) {
+    if (Date.now() - ts > DEDUP_WINDOW_MS * 10) {
+      recentlyProcessed.delete(id);
+    }
+  }
+
+  return false;
+}
+
+// ─────────────────────────────────────────────
+// 📋 Attio webhook
 // ─────────────────────────────────────────────
 app.post("/attio-webhook", async (req, res) => {
   const data = req.body;
 
   console.log("Attio event received:", JSON.stringify(data, null, 2));
 
-  // ✅ Respond to Attio immediately
+  // Respond to Attio immediately
   res.sendStatus(200);
 
-  // ✅ Only process the FIRST event to avoid duplicate messages
   const event = data.events?.[0];
   if (!event) return;
 
   const { object_id, record_id } = event.id;
 
+  // ✅ Skip if we already processed this record in the last 5 seconds
+  if (isDuplicate(record_id)) {
+    console.log(`⏭️ Skipping duplicate event for record_id: ${record_id}`);
+    return;
+  }
+
   try {
-    // Fetch the full record from Attio API
     const record = await getAttioRecord(object_id, record_id);
 
-    console.log("Attio record fetched:", JSON.stringify(record, null, 2));
-
-    // Extract values — the log above will show exact field names if these don't match
+    // Name
     const name =
       record.values?.name?.[0]?.full_name ||
       record.values?.name?.[0]?.value ||
       "Unknown";
 
-    const company =
-      record.values?.company?.[0]?.target_record?.values?.name?.[0]?.value ||
-      record.values?.company?.[0]?.value ||
-      "Unknown";
-
+    // Email
     const email =
       record.values?.email_addresses?.[0]?.email_address ||
-      record.values?.primary_email_address?.[0]?.email_address ||
       "No email";
+
+    // Company — requires a second API call since it's a record-reference
+    const companyRef = record.values?.company?.[0];
+    const company = companyRef?.target_record_id
+      ? await getCompanyName(companyRef.target_record_id)
+      : "Unknown";
 
     const notifyChatId = process.env.LARK_NOTIFY_CHAT_ID;
     const eventLabel =
