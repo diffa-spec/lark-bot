@@ -45,6 +45,27 @@ app.post("/", async (req, res) => {
   res.json({});
 });
 
+app.post("/attio-webhook", async (req, res) => {
+  const data = req.body;
+
+  console.log("Attio event received:", data);
+
+  // Adjust based on Attio's actual payload structure
+  const name = data.data?.values?.name || "Unknown";
+  const company = data.data?.values?.company || "Unknown";
+  const email = data.data?.values?.email || "No email";
+
+  await sendMessageToLark(`
+📇 New Contact Added to Attio
+
+Name: ${name}
+Company: ${company}
+Email: ${email}
+  `);
+
+  res.sendStatus(200);
+});
+
 app.get("/", (req, res) => {
   res.send("Server running");
 });
